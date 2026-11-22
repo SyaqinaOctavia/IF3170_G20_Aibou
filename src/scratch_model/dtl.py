@@ -62,6 +62,178 @@ class DecisionTreeClassifier:
             setattr(self, key, value)
         return self
 
+    def fit(self, X, y, sample_weight=None):
+            self._validate_params()
+            df = self._frame(X, fitting=True)
+            y = np.asarray(y)
+            if len(y) != len(df):
+                raise ValueError("Jumlah baris X dan y tidak sama.")
+    
+            self.classes_, y_idx = np.unique(y, return_inverse=True)
+            self._n_classes = len(self.classes_)
+    
+            self._setup_features(df)
+            self._cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
+            self._y = y_idx.astype(np.int64)
+    
+            weights = self._sample_weights(sample_weight, y_idx)
+            self._min_leaf = max(int(self.min_samples_leaf), 1)
+            self._n_candidate_features = self._resolve_max_features()
+            self._rng = np.random.RandomState(self.random_state)
+    
+            try:
+                keep = np.nonzero(weights > 0)[0]
+                self.root_ = self._build(keep, weights[keep].copy(), 0)
+                if self.ccp_alpha and self.ccp_alpha > 0:
+                    self._prune(self.root_, self.root_.weight)
+                self._compute_importances()
+            finally:
+                del self._cols, self._y, self._rng
+            return self
+
+    def predict_proba(self, X):
+        self._check_fitted()
+        df = self._frame(X, fitting=False)
+        cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
+        n = len(df)
+        out = np.zeros((n, self._n_classes))
+        self._descend(self.root_, np.arange(n), np.ones(n), cols, out)
+        return out
+
+    def predict(self, X):
+        proba = self.predict_proba(X)
+        return self.classes_[np.argmax(proba, axis=1)]
+
+    def score(self, X, y):
+        return float(np.mean(self.predict(X) == np.asarray(y)))
+
+    def get_depth(self):
+        self._check_fitted()
+
+        def rec(node):
+            return 0 if node.is_leaf else 1 + max(rec(c) for c in node.children.values())
+        return rec(self.root_)
+
+    def get_n_leaves(self):
+        self._check_fitted()
+
+        def rec(node):
+            return 1 if node.is_leaf else sum(rec(c) for c in node.children.values())
+        return rec(self.root_)
+
+    def get_node_count(self):
+        self._check_fitted()
+
+        def rec(node):
+            return 1 + sum(rec(c) for c in node.children.values())
+        return rec(self.root_)
+
+    def export_text(self, feature_names=None, max_depth=None, decimals=3):
+        self._check_fitted()
+        names = feature_names or self.feature_names_
+        lines = []
+
+        def label(node):
+            k = int(np.argmax(node.class_weights))
+            return f"class: {self.classes_[k]} (weight={node.weight:.{decimals}g})"
+
+        def rec(node, indent):
+            if node.is_leaf or (max_depth is not None and node.depth >= max_depth):
+                lines.append(f"{indent}{label(node)}")
+                return
+            for key, child in node.children.items():
+                lines.append(f"{indent}|--- {names[node.feature]} {self._edge_label(node, key, decimals)}")
+                rec(child, indent + "|   ")
+
+        rec(self.root_, "")
+        return "\n".join(lines)
+
+    def save(self, path):
+        self._check_fitted()
+        rows = []
+
+        def rec(node):
+            nid = len(rows)
+            rows.append(None)
+            child_ids = {str(k): rec(c) for k, c in node.children.items()}
+            rows[nid] = {
+                "kind": "node", "node_id": nid,
+                "feature": -1 if node.feature is None else int(node.feature),
+                "threshold": np.nan if node.threshold is None else float(node.threshold),
+                "children": json.dumps(child_ids),
+                "branch_weights": json.dumps({str(k): float(v) for k, v in node.branch_weights.items()}),
+                "class_weights": json.dumps(node.class_weights.tolist()),
+                "n_samples": node.n_samples, "depth": node.depth,
+                "impurity": node.impurity, "gain": node.gain, "meta": None,
+            }
+            return nid
+
+        rec(self.root_)
+        meta = {
+            "params": self.get_params(),
+            "classes": self.classes_.tolist(),
+            "feature_names": list(self.feature_names_),
+            "is_numeric": [bool(b) for b in self.is_numeric_feature_],
+            "categories": self.categories_,
+            "importances": self.feature_importances_.tolist(),
+        }
+        meta_json = json.dumps(meta, default=_json_default)
+
+        if str(path).endswith(".json"):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"meta": json.loads(meta_json), "nodes": rows}, fh, default=_json_default)
+            return
+        table = pd.DataFrame(rows)
+        meta_row = {c: None for c in table.columns}
+        meta_row.update({"kind": "meta", "meta": meta_json})
+        table = pd.concat([pd.DataFrame([meta_row]), table], ignore_index=True)
+        table.to_parquet(path, index=False)
+
+    @classmethod
+    def load(cls, path):
+        if str(path).endswith(".json"):
+            with open(path, "r", encoding="utf-8") as fh:
+                blob = json.load(fh)
+            meta, rows = blob["meta"], blob["nodes"]
+        else:
+            table = pd.read_parquet(path)
+            meta = json.loads(table.loc[table["kind"] == "meta", "meta"].iloc[0])
+            rows = table[table["kind"] == "node"].sort_values("node_id").to_dict("records")
+
+        model = cls(**meta["params"])
+        model.classes_ = np.array(meta["classes"])
+        model._n_classes = len(model.classes_)
+        model.feature_names_ = list(meta["feature_names"])
+        model.is_numeric_feature_ = list(meta["is_numeric"])
+        model.categories_ = meta["categories"]
+        model.n_features_in_ = len(model.feature_names_)
+        model._cat_maps = [None if c is None else {v: i for i, v in enumerate(c)}
+                           for c in model.categories_]
+        model.feature_importances_ = np.array(meta["importances"])
+
+        nodes = {}
+        for r in rows:
+            node = _TreeNode(np.array(json.loads(r["class_weights"]) if isinstance(r["class_weights"], str)
+                                      else r["class_weights"], dtype=float),
+                             int(r["n_samples"]), int(r["depth"]), float(r["impurity"]))
+            node.gain = float(r["gain"])
+            if int(r["feature"]) >= 0:
+                node.feature = int(r["feature"])
+                if model.is_numeric_feature_[node.feature]:
+                    node.threshold = float(r["threshold"])
+            nodes[int(r["node_id"])] = (node, r)
+        for node, r in nodes.values():
+            if node.feature is None:
+                continue
+            child_ids = json.loads(r["children"]) if isinstance(r["children"], str) else r["children"]
+            bweights = json.loads(r["branch_weights"]) if isinstance(r["branch_weights"], str) else r["branch_weights"]
+            for k, cid in child_ids.items():
+                key = int(k)
+                node.children[key] = nodes[int(cid)][0]
+                node.branch_weights[key] = float(bweights[k])
+        model.root_ = nodes[0][0]
+        return model
+    
     def _validate_params(self):
         if self.criterion not in ("gain_ratio", "entropy", "gini"):
             raise ValueError("criterion harus 'gain_ratio', 'entropy', atau 'gini'.")
@@ -74,10 +246,6 @@ class DecisionTreeClassifier:
         if self.ccp_alpha is not None and self.ccp_alpha < 0:
             raise ValueError("ccp_alpha harus >= 0.")
 
-    def _check_fitted(self):
-        if not hasattr(self, "root_"):
-            raise RuntimeError("Model belum di-fit. Panggil fit(X, y) terlebih dahulu.")
-    
     def _check_fitted(self):
         if not hasattr(self, "root_"):
             raise RuntimeError("Model belum di-fit. Panggil fit(X, y) terlebih dahulu.")
@@ -190,6 +358,47 @@ class DecisionTreeClassifier:
         p = p[p > 0]
         return float(-np.sum(p * np.log2(p)))
 
+    def _build(self, idx, w, depth):
+            cw = np.bincount(self._y[idx], weights=w, minlength=self._n_classes)
+            node = _TreeNode(cw, len(idx), depth, self._impurity(cw))
+    
+            if (cw > 0).sum() <= 1:
+                return node
+            if self.max_depth is not None and depth >= self.max_depth:
+                return node
+            if len(idx) < self.min_samples_split or len(idx) < 2 * self._min_leaf:
+                return node
+    
+            split = self._best_split(idx, w)
+            if split is None:
+                return node
+    
+            f = split["feature"]
+            col = self._cols[f][idx]
+            node.feature, node.gain = f, split["gain"]
+            parts = {}
+            if self.is_numeric_feature_[f]:
+                node.threshold = split["threshold"]
+                miss = np.isnan(col)
+                left = ~miss & (col <= node.threshold)
+                right = ~miss & ~left
+                wl, wr = w[left].sum(), w[right].sum()
+                parts[0] = (left, wl / (wl + wr))
+                parts[1] = (right, wr / (wl + wr))
+            else:
+                miss = col < 0
+                wk = w[~miss].sum()
+                for cat in split["categories"]:
+                    mask = col == cat
+                    parts[int(cat)] = (mask, w[mask].sum() / wk)
+    
+            for key, (mask, p) in parts.items():
+                child_idx = np.concatenate([idx[mask], idx[miss]])
+                child_w = np.concatenate([w[mask], w[miss] * p])
+                node.branch_weights[key] = float(p)
+                node.children[key] = self._build(child_idx, child_w, depth + 1)
+            return node
+    
     def _best_split(self, idx, w):
         W = w.sum()
         n_feat = self.n_features_in_
@@ -287,6 +496,34 @@ class DecisionTreeClassifier:
         ratio = gain / split_info if split_info > 1e-12 else 0.0
         return {"feature": f, "gain": gain, "ratio": ratio, "categories": present}
 
+    def _prune(self, node, total_weight):
+        r_node = node.impurity * node.weight / total_weight
+        if node.is_leaf:
+            return r_node, 1
+        r_sub, leaves = 0.0, 0
+        for child in node.children.values():
+            r, n_leaf = self._prune(child, total_weight)
+            r_sub += r
+            leaves += n_leaf
+        if r_node - r_sub <= self.ccp_alpha * (leaves - 1) + 1e-15:
+            node.make_leaf()
+            return r_node, 1
+        return r_sub, leaves
+
+    def _compute_importances(self):
+        imp = np.zeros(self.n_features_in_)
+
+        def rec(node):
+            if node.is_leaf:
+                return
+            imp[node.feature] += node.weight * node.gain
+            for child in node.children.values():
+                rec(child)
+
+        rec(self.root_)
+        total = imp.sum()
+        self.feature_importances_ = imp / total if total > 0 else imp
+
     def _descend(self, node, idx, wts, cols, out):
         if len(idx) == 0:
             return
@@ -308,3 +545,19 @@ class DecisionTreeClassifier:
                           np.concatenate([idx[m], idx[miss]]),
                           np.concatenate([wts[m], wts[miss] * p]),
                           cols, out)
+
+    def _edge_label(self, node, key, decimals=3):
+        if self.is_numeric_feature_[node.feature]:
+            return (f"<= {node.threshold:.{decimals}g}" if key == 0 else f"> {node.threshold:.{decimals}g}")
+        return f"= {self.categories_[node.feature][key]}"
+
+def _json_default(o):
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, (np.bool_,)):
+        return bool(o)
+    return str(o)
