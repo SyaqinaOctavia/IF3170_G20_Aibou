@@ -83,7 +83,6 @@ class DecisionTreeClassifier:
             raise RuntimeError("Model belum di-fit. Panggil fit(X, y) terlebih dahulu.")
 
     def _frame(self, X, fitting):
-        """Ubah input ke DataFrame; pada prediksi, urutkan kolom sesuai saat fit."""
         if isinstance(X, pd.DataFrame):
             df = X
             if not fitting:
@@ -175,3 +174,137 @@ class DecisionTreeClassifier:
         if isinstance(mf, float):
             return int(min(max(1, int(mf * n)), n))
         raise ValueError("max_features tidak valid.")
+
+    def _impurity(self, counts):
+        counts = np.asarray(counts, dtype=float)
+        total = counts.sum(axis=-1, keepdims=True)
+        p = np.divide(counts, total, out=np.zeros_like(counts), where=total > 0)
+        if self.criterion == "gini":
+            return 1.0 - np.sum(p * p, axis=-1)
+        logp = np.log2(p, out=np.zeros_like(p), where=p > 0)
+        return -np.sum(p * logp, axis=-1)
+
+    @staticmethod
+    def _entropy_of_probs(p):
+        p = np.asarray(p, dtype=float)
+        p = p[p > 0]
+        return float(-np.sum(p * np.log2(p)))
+
+    def _best_split(self, idx, w):
+        W = w.sum()
+        n_feat = self.n_features_in_
+        if self._n_candidate_features >= n_feat:
+            feats = range(n_feat)
+        else:
+            feats = self._rng.choice(n_feat, self._n_candidate_features, replace=False)
+
+        cands = []
+        for f in feats:
+            if self.is_numeric_feature_[f]:
+                res = self._eval_numeric(f, idx, w, W)
+            else:
+                res = self._eval_categorical(f, idx, w, W)
+            if res is not None:
+                cands.append(res)
+        if not cands:
+            return None
+
+        if self.criterion == "gain_ratio":
+            mean_gain = np.mean([c["gain"] for c in cands])
+            eligible = [c for c in cands if c["gain"] >= mean_gain - 1e-12]
+            best = max(eligible, key=lambda c: c["ratio"])
+            score = best["ratio"]
+        else:
+            best = max(cands, key=lambda c: c["gain"])
+            score = best["gain"]
+        if best["gain"] <= 1e-12 or score < self.min_gain_ratio:
+            return None
+        return best
+
+    def _eval_numeric(self, f, idx, w, W):
+        v = self._cols[f][idx]
+        known = ~np.isnan(v)
+        n_known = int(known.sum())
+        if n_known < 2 * self._min_leaf:
+            return None
+        vk, yk, wk = v[known], self._y[idx][known], w[known]
+        Wk = wk.sum()
+        if Wk <= 0:
+            return None
+
+        order = np.argsort(vk, kind="mergesort")
+        vs = vk[order]
+        pos = np.nonzero(vs[:-1] < vs[1:])[0]             
+        pos = pos[((pos + 1) >= self._min_leaf) & ((n_known - pos - 1) >= self._min_leaf)]
+        if len(pos) == 0:
+            return None
+
+        onehot = np.zeros((n_known, self._n_classes))
+        onehot[np.arange(n_known), yk[order]] = wk[order]
+        cum = np.cumsum(onehot, axis=0)
+        total = cum[-1]
+        left = cum[pos]
+        right = np.maximum(total - left, 0.0)
+        wl, wr = left.sum(axis=1), right.sum(axis=1)
+
+        child_imp = (wl * self._impurity(left) + wr * self._impurity(right)) / Wk
+        gains = self._impurity(total) - child_imp
+        b = int(np.argmax(gains))
+        gain = (Wk / W) * float(gains[b])
+
+        i = pos[b]
+        thr = (vs[i] + vs[i + 1]) / 2.0
+        if not (vs[i] <= thr < vs[i + 1]):
+            thr = vs[i]
+
+        split_info = self._entropy_of_probs([wl[b] / W, wr[b] / W, (W - Wk) / W])
+        ratio = gain / split_info if split_info > 1e-12 else 0.0
+        return {"feature": f, "gain": gain, "ratio": ratio, "threshold": float(thr)}
+
+    def _eval_categorical(self, f, idx, w, W):
+        c = self._cols[f][idx]
+        known = c >= 0
+        if not known.any():
+            return None
+        cc, yk, wk = c[known], self._y[idx][known], w[known]
+        Wk = wk.sum()
+        if Wk <= 0:
+            return None
+
+        n_cat = len(self.categories_[f])
+        rows = np.bincount(cc, minlength=n_cat)
+        present = np.nonzero(rows > 0)[0]
+        if len(present) < 2 or (rows[present] < self._min_leaf).any():
+            return None
+
+        K = self._n_classes
+        M = np.bincount(cc * K + yk, weights=wk, minlength=n_cat * K).reshape(n_cat, K)[present]
+        wc = M.sum(axis=1)
+        gain_k = float(self._impurity(M.sum(axis=0)) - np.sum(wc * self._impurity(M)) / Wk)
+        gain = (Wk / W) * gain_k
+
+        split_info = self._entropy_of_probs(np.append(wc / W, (W - Wk) / W))
+        ratio = gain / split_info if split_info > 1e-12 else 0.0
+        return {"feature": f, "gain": gain, "ratio": ratio, "categories": present}
+
+    def _descend(self, node, idx, wts, cols, out):
+        if len(idx) == 0:
+            return
+        if node.is_leaf:
+            out[idx] += wts[:, None] * node.proba
+            return
+        col = cols[node.feature][idx]
+        if self.is_numeric_feature_[node.feature]:
+            miss = np.isnan(col)
+            masks = {0: ~miss & (col <= node.threshold), 1: ~miss & (col > node.threshold)}
+        else:
+            keys = np.fromiter(node.children.keys(), dtype=np.int64)
+            miss = ~np.isin(col, keys)
+            masks = {k: col == k for k in node.children}
+        for key, child in node.children.items():
+            m = masks[key]
+            p = node.branch_weights[key]
+            self._descend(child,
+                          np.concatenate([idx[m], idx[miss]]),
+                          np.concatenate([wts[m], wts[miss] * p]),
+                          cols, out)
