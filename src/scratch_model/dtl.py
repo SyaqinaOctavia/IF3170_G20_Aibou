@@ -77,3 +77,101 @@ class DecisionTreeClassifier:
     def _check_fitted(self):
         if not hasattr(self, "root_"):
             raise RuntimeError("Model belum di-fit. Panggil fit(X, y) terlebih dahulu.")
+    
+    def _check_fitted(self):
+        if not hasattr(self, "root_"):
+            raise RuntimeError("Model belum di-fit. Panggil fit(X, y) terlebih dahulu.")
+
+    def _frame(self, X, fitting):
+        """Ubah input ke DataFrame; pada prediksi, urutkan kolom sesuai saat fit."""
+        if isinstance(X, pd.DataFrame):
+            df = X
+            if not fitting:
+                names = list(self.feature_names_)
+                cols = [str(c) for c in df.columns]
+                if set(names).issubset(cols):
+                    df = df.iloc[:, [cols.index(n) for n in names]]
+                elif df.shape[1] != self.n_features_in_:
+                    raise ValueError(f"Jumlah fitur ({df.shape[1]}) != saat fit ({self.n_features_in_}).")
+            return df
+        arr = np.asarray(X)
+        if arr.ndim != 2:
+            raise ValueError("X harus 2 dimensi.")
+        if not fitting and arr.shape[1] != self.n_features_in_:
+            raise ValueError(f"Jumlah fitur ({arr.shape[1]}) != saat fit ({self.n_features_in_}).")
+        df = pd.DataFrame(arr)
+        if fitting and arr.dtype == object:
+            for j in df.columns:
+                try:
+                    df[j] = pd.to_numeric(df[j])
+                except (ValueError, TypeError):
+                    pass
+        return df
+
+    def _setup_features(self, df):
+        self.n_features_in_ = df.shape[1]
+        if isinstance(df.columns, pd.RangeIndex):
+            default = [f"x{i}" for i in range(df.shape[1])]
+            names = list(self.feature_names) if self.feature_names is not None else default
+        else:
+            names = [str(c) for c in df.columns]
+        if len(names) != self.n_features_in_:
+            raise ValueError("feature_names tidak sesuai jumlah kolom X.")
+        self.feature_names_ = names
+
+        self.is_numeric_feature_, self.categories_, self._cat_maps = [], [], []
+        for j in range(self.n_features_in_):
+            s = df.iloc[:, j]
+            if pd.api.types.is_bool_dtype(s) or pd.api.types.is_numeric_dtype(s):
+                self.is_numeric_feature_.append(True)
+                self.categories_.append(None)
+                self._cat_maps.append(None)
+            else:
+                values = list(pd.unique(s.dropna()))
+                try:
+                    values = sorted(values)
+                except TypeError:
+                    pass
+                self.is_numeric_feature_.append(False)
+                self.categories_.append(values)
+                self._cat_maps.append({v: i for i, v in enumerate(values)})
+
+    def _encode_column(self, s, j):
+        if self.is_numeric_feature_[j]:
+            return pd.to_numeric(s, errors="coerce").to_numpy(dtype=float, na_value=np.nan)
+        mapped = pd.to_numeric(s.astype(object).map(self._cat_maps[j]), errors="coerce")
+        codes = mapped.to_numpy(dtype=float, na_value=np.nan)
+        return np.where(np.isnan(codes), -1, codes).astype(np.int64)
+
+    def _sample_weights(self, sample_weight, y_idx):
+        n = len(y_idx)
+        w = np.ones(n) if sample_weight is None else np.asarray(sample_weight, dtype=float).copy()
+        if len(w) != n:
+            raise ValueError("sample_weight harus sepanjang y.")
+        if (w < 0).any():
+            raise ValueError("sample_weight tidak boleh negatif.")
+        if self.class_weight is not None:
+            counts = np.bincount(y_idx, minlength=self._n_classes)
+            if isinstance(self.class_weight, str):
+                if self.class_weight != "balanced":
+                    raise ValueError("class_weight string hanya mendukung 'balanced'.")
+                cw = n / (self._n_classes * np.maximum(counts, 1))
+            else:
+                cw = np.array([self.class_weight.get(c, self.class_weight.get(c.item() if hasattr(c, "item") else c, 1.0))
+                               for c in self.classes_], dtype=float)
+            w = w * cw[y_idx]
+        return w
+
+    def _resolve_max_features(self):
+        n, mf = self.n_features_in_, self.max_features
+        if mf is None:
+            return n
+        if mf == "sqrt":
+            return max(1, int(np.sqrt(n)))
+        if mf == "log2":
+            return max(1, int(np.log2(n)))
+        if isinstance(mf, (int, np.integer)):
+            return int(min(max(mf, 1), n))
+        if isinstance(mf, float):
+            return int(min(max(1, int(mf * n)), n))
+        raise ValueError("max_features tidak valid.")
