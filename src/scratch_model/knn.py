@@ -16,6 +16,9 @@ class KNN: #classification saja
     
         if metric not in ["euclidean", "manhattan", "chebyshev", "minkowski"]:
             raise ValueError("Metric tidak tersedia")
+
+        if weights not in ["uniform", "distance"]:
+            raise ValueError("weights harus 'uniform' atau 'distance'")
         
         self.k_neighbors = k_neighbors
         self.weights = weights
@@ -27,15 +30,18 @@ class KNN: #classification saja
         self.X_train = np.array(X)
         self.y_train = np.array(y)
 
-        self.numeric_index = [
-            i for i, dtype in enumerate(X.dtypes)
-            if pd.api.types.is_numeric_dtype(dtype)
-        ]
-
-        self.category_index = [
-            i for i, dtype in enumerate(X.dtypes)
-            if not pd.api.types.is_numeric_dtype(dtype)
-        ]
+        if hasattr(X, "dtypes"):
+            self.numeric_index = [
+                i for i, dtype in enumerate(X.dtypes)
+                if pd.api.types.is_numeric_dtype(dtype)
+            ]
+            self.category_index = [
+                i for i, dtype in enumerate(X.dtypes)
+                if not pd.api.types.is_numeric_dtype(dtype)
+            ]
+        else:
+            self.numeric_index = list(range(self.X_train.shape[1]))
+            self.category_index = []
 
         return self
 
@@ -43,13 +49,27 @@ class KNN: #classification saja
         X_test = np.array(X)
         prediction = []
         for i in range(len(X_test)):
-            neigh_index = self.kneighbors(X_test[i])
-            nearest_labels = self.y_train[neigh_index]
-            
-            labels, counts = np.unique(nearest_labels, return_counts=True)
-            max_count = np.max(counts)
+            if self.weights == "distance":
+                nearest_distances, neigh_index = self.kneighbors(X_test[i], return_distance=True)
+                nearest_labels = self.y_train[neigh_index]
 
-            candidates = labels[counts == max_count]
+                zero_mask = nearest_distances == 0
+                if np.any(zero_mask):
+                    w = zero_mask.astype(float)
+                else:
+                    w = 1.0 / nearest_distances
+
+                labels = np.unique(nearest_labels)
+                scores = np.array([w[nearest_labels == lbl].sum() for lbl in labels])
+                max_score = np.max(scores)
+                candidates = labels[scores == max_score]
+            else:
+                neigh_index = self.kneighbors(X_test[i])
+                nearest_labels = self.y_train[neigh_index]
+
+                labels, counts = np.unique(nearest_labels, return_counts=True)
+                max_count = np.max(counts)
+                candidates = labels[counts == max_count]
 
             if len(candidates) == 1:
                 mode = candidates[0]
@@ -93,7 +113,7 @@ class KNN: #classification saja
         elif self.metric == "minkowski":
             return distance ** (1 / self.p)
 
-    def kneighbors(self, new_row):
+    def kneighbors(self, new_row, return_distance=False):
         distance = []
 
         for i in range(len(self.X_train)):
@@ -101,8 +121,11 @@ class KNN: #classification saja
 
         distance = np.array(distance)
         nearest_indices = np.argpartition(distance, self.k_neighbors - 1)[:self.k_neighbors]
+        sorted_indices = nearest_indices[np.argsort(distance[nearest_indices])]
 
-        return nearest_indices[np.argsort(distance[nearest_indices])]
+        if return_distance:
+            return distance[sorted_indices], sorted_indices
+        return sorted_indices
 
     def save(self, filename=None):
         target = resolve_model_path(filename, "knn")
