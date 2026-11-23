@@ -43,6 +43,8 @@ class KNN: #classification saja
             self.numeric_index = list(range(self.X_train.shape[1]))
             self.category_index = []
 
+        self._X_num = self.X_train[:, self.numeric_index].astype(float) if self.numeric_index else None
+        self._X_cat = self.X_train[:, self.category_index] if self.category_index else None
         return self
 
     def predict(self, X):
@@ -114,12 +116,44 @@ class KNN: #classification saja
             return distance ** (1 / self.p)
 
     def kneighbors(self, new_row, return_distance=False):
-        distance = []
+        X_num = getattr(self, "_X_num", None)
+        if X_num is None and self.numeric_index:
+            X_num = self.X_train[:, self.numeric_index].astype(float)
+            self._X_num = X_num
 
-        for i in range(len(self.X_train)):
-            distance.append(self.count_distance(self.X_train[i], new_row))
+        X_cat = getattr(self, "_X_cat", None)
+        if X_cat is None and self.category_index:
+            X_cat = self.X_train[:, self.category_index]
+            self._X_cat = X_cat
 
-        distance = np.array(distance)
+        cat_diff = (X_cat != new_row[self.category_index]).astype(float) if X_cat is not None else None
+        num_diff = np.abs(X_num - np.asarray(new_row[self.numeric_index], dtype=float)) if X_num is not None else None
+
+        if self.metric == "chebyshev":
+            parts = []
+            if cat_diff is not None:
+                parts.append(cat_diff.max(axis=1))
+            if num_diff is not None:
+                parts.append(num_diff.max(axis=1))
+            distance = np.maximum.reduce(parts) if parts else np.zeros(len(self.X_train), dtype=float)
+        else:
+            distance = np.zeros(len(self.X_train), dtype=float)
+            if cat_diff is not None:
+                distance += cat_diff.sum(axis=1)
+            if num_diff is not None:
+                if self.metric == "euclidean":
+                    distance += (num_diff ** 2).sum(axis=1)
+                elif self.metric == "manhattan":
+                    distance += num_diff.sum(axis=1)
+                elif self.metric == "minkowski":
+                    distance += (num_diff ** self.p).sum(axis=1)
+                else:
+                    raise ValueError(f"Metric '{self.metric}' tidak didukung.")
+            if self.metric == "euclidean":
+                distance = np.sqrt(distance)
+            elif self.metric == "minkowski":
+                distance = distance ** (1.0 / self.p)
+
         nearest_indices = np.argpartition(distance, self.k_neighbors - 1)[:self.k_neighbors]
         sorted_indices = nearest_indices[np.argsort(distance[nearest_indices])]
 
