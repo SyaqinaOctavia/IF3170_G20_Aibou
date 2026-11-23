@@ -1,5 +1,9 @@
+import json
+
 import numpy as np
 import pandas as pd
+
+from ._paths import resolve_model_path
 
 class KNN: #classification saja
 
@@ -62,7 +66,11 @@ class KNN: #classification saja
         distance, diff = 0, 0
 
         for i in self.category_index:
-            distance += train_row[i] != test_row[i]
+            mismatch = train_row[i] != test_row[i]
+            if self.metric == "chebyshev":
+                distance = max(distance, mismatch)
+            else:
+                distance += mismatch
         
         for i in self.numeric_index:
             diff = abs(train_row[i] - test_row[i])
@@ -95,3 +103,46 @@ class KNN: #classification saja
         nearest_indices = np.argpartition(distance, self.k_neighbors - 1)[:self.k_neighbors]
 
         return nearest_indices[np.argsort(distance[nearest_indices])]
+
+    def save(self, filename=None):
+        target = resolve_model_path(filename, "knn")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "model_class": type(self).__name__,
+            "state": {
+                "k_neighbors": self.k_neighbors,
+                "weights": self.weights,
+                "p": self.p,
+                "metric": self.metric,
+                "task": self.task,
+                "numeric_index": self.numeric_index,
+                "category_index": self.category_index,
+                "X_train": {"dtype": str(self.X_train.dtype), "data": self.X_train.tolist()},
+                "y_train": {"dtype": str(self.y_train.dtype), "data": self.y_train.tolist()},
+            },
+        }
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        temporary.replace(target)
+        return target
+
+    @staticmethod
+    def load(filename=None):
+        target = resolve_model_path(filename, "knn", load=True)
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        if payload.get("model_class") != "KNN":
+            raise ValueError("Berkas JSON bukan state KNN")
+
+        state = payload["state"]
+        model = KNN(
+            k_neighbors=state["k_neighbors"],
+            weights=state["weights"],
+            p=state["p"],
+            metric=state["metric"],
+            task=state["task"],
+        )
+        model.numeric_index = state["numeric_index"]
+        model.category_index = state["category_index"]
+        model.X_train = np.array(state["X_train"]["data"], dtype=state["X_train"]["dtype"])
+        model.y_train = np.array(state["y_train"]["data"], dtype=state["y_train"]["dtype"])
+        return model
