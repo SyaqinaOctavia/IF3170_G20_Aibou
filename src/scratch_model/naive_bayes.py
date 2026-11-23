@@ -16,7 +16,7 @@ class NaiveBayes:
         self.priors = priors
 
     def fit(self, X, y):
-        if len(X) != len(X):
+        if len(X) != len(y):
             raise ValueError("X and y are not the same length")
 
         total = len(y)
@@ -64,8 +64,7 @@ class NaiveBayes:
                         self._cat_prob[c_key][col][key] = (N_itc + self.alpha) / (N_c + self.alpha * ni)  
                 else:
                     assert False
-        
-                
+              
     def predict(self, X, use_log_space=False):
         for col, ftype in self._feature_types.items():
             if col not in np.asarray(X.columns):
@@ -80,7 +79,7 @@ class NaiveBayes:
         return result
 
     def _predict_proba(self, X_row, use_log_space=False):
-        p_best = 0
+        p_best = -math.inf
         c_best = self._classes[0]
         for c in self._classes:
             c_key = str(c)
@@ -203,7 +202,7 @@ class NaiveBayes:
                     for value in self._cat_prob[c_key][col].keys():
                         key = value if value != '__nan__' else 'nan'
                         graph.node(f'{self._target_name}={c},{col}={key}', f'{col}={key}')
-                        graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}=x', label=f'P={self._cat_prob[c_key][col].get(value, 0)}')
+                        graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}={key}', label=f'P={self._cat_prob[c_key][col].get(value, 0)}')
                 else:
                     assert False
         return graph
