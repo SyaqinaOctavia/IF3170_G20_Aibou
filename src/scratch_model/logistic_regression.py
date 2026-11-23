@@ -1,13 +1,13 @@
-import json
-import math
-from pathlib import Path
+import json # gak perlu di deepnote 
+import math # gak perlu di deepnote 
+from pathlib import Path # gak perlu di deepnote 
 
-import numpy as np
+import numpy as np # gak perlu di deepnote 
 
 
 class LogisticRegression:
 
-    def __init__(self, penalty="l2", C=1.0, l1_ratio=0.5, fit_intercept=True, max_iter=1000, learning_rate=0.1, tol=1e-6, solver="gradient_descent", batch_size=None, random_state=None):
+    def __init__(self, penalty="l2", C=1.0, l1_ratio=0.5, fit_intercept=True, max_iter=1000, learning_rate=0.1, tol=1e-6, solver="gradient_descent", batch_size=None, random_state=None, record_history=False):
         if penalty not in ("l1", "l2", "elasticnet", None):
             raise ValueError("penalty harus 'l1', 'l2', 'elasticnet', atau None")
         if not np.isfinite(C) or C <= 0:
@@ -31,6 +31,7 @@ class LogisticRegression:
         self.solver = solver
         self.batch_size = batch_size
         self.random_state = random_state
+        self.record_history = bool(record_history)
 
     @staticmethod
     def _encode_json(value):
@@ -154,6 +155,7 @@ class LogisticRegression:
             X_fit = X
         n_outputs = targets.shape[1]
         theta = np.zeros((n_outputs, X_fit.shape[1]), dtype=float)
+        theta_history = [theta.copy()] if self.record_history else None
         rng = np.random.default_rng(self.random_state)
         batch_size = len(X) if self.batch_size is None else min(self.batch_size, len(X))
         self.loss_history_ = []
@@ -180,12 +182,16 @@ class LogisticRegression:
                     threshold = self.learning_rate * strength * l1_fraction / n_outputs
                     coef = theta[:, :coef_count]
                     theta[:, :coef_count] = np.sign(coef) * np.maximum(np.abs(coef) - threshold, 0.0)
+            if theta_history is not None:
+                theta_history.append(theta.copy())
             loss = self._loss(X_fit, targets, theta)
             self.loss_history_.append(float(loss))
             if len(self.loss_history_) > 1 and abs(self.loss_history_[-2] - loss) < self.tol:
                 break
 
         self.n_iter_ = len(self.loss_history_)
+        if theta_history is not None:
+            self.theta_history_ = np.asarray(theta_history)
         self.coef_matrix_ = theta[:, :self.n_features_in_].copy()
         self.intercept_vector_ = theta[:, -1].copy() if self.fit_intercept else np.zeros(n_outputs)
         if self.is_binary_:
@@ -196,7 +202,7 @@ class LogisticRegression:
             self.intercept_ = self.intercept_vector_.copy()
         return self
 
-    def _validate_X(self, X):
+    def val_x(self, X):
         feature_names = list(X.columns) if hasattr(X, "columns") else None
         X = np.asarray(X, dtype=float)
         if X.ndim != 2 or X.shape[1] != self.n_features_in_:
@@ -207,13 +213,13 @@ class LogisticRegression:
             raise ValueError("Nama dan urutan fitur harus sama seperti data training")
         return X
 
-    def decision_function(self, X):
-        X = self._validate_X(X)
+    def decision(self, X):
+        X = self.val_x(X)
         scores = X @ self.coef_matrix_.T + self.intercept_vector_
         return scores[:, 0] if self.is_binary_ else scores
 
-    def predict_proba(self, X):
-        scores = self.decision_function(X)
+    def prediction_probability(self, X):
+        scores = self.decision(X)
         if self.is_binary_:
             p1 = self._sigmoid(scores)
             return np.column_stack([1.0 - p1, p1])
@@ -221,7 +227,7 @@ class LogisticRegression:
         return probs / np.clip(probs.sum(axis=1, keepdims=True), 1e-15, None)
 
     def predict(self, X):
-        scores = self.decision_function(X)
+        scores = self.decision(X)
         if self.is_binary_:
             return self.classes_[(scores >= 0).astype(int)]
         return self.classes_[np.argmax(scores, axis=1)]
