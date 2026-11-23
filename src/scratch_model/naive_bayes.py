@@ -65,7 +65,7 @@ class NaiveBayes:
                 else:
                     assert False
               
-    def predict(self, X, use_log_space=False):
+    def predict(self, X, use_log_space=True):
         for col, ftype in self._feature_types.items():
             if col not in np.asarray(X.columns):
                 raise IndexError("X does not have column named " + col)
@@ -78,7 +78,7 @@ class NaiveBayes:
             result.append(self._predict_proba(row, use_log_space))
         return result
 
-    def _predict_proba(self, X_row, use_log_space=False):
+    def _predict_proba(self, X_row, use_log_space=True):
         p_best = -math.inf
         c_best = self._classes[0]
         for c in self._classes:
@@ -88,7 +88,7 @@ class NaiveBayes:
             else:
                 p_current = self._class_prior[c_key]
             if use_log_space:
-                p_current = math.log(p_current)
+                p_current = math.log(p_current) if p_current > 0 else -math.inf
             for col, ftype in self._feature_types.items():
                 value = X_row[col]
                 if ftype == 'numeric':
@@ -104,11 +104,12 @@ class NaiveBayes:
                     else:
                         p_current += -1/2 * math.log(2 * math.pi * var) - (value - mean)**2 / (2 * var)
                 elif ftype == 'categorical':
-                    key = value if not pd.isna(value) else "__nan__"
+                    key = str(value) if not pd.isna(value) else "__nan__"
                     if not use_log_space:
                         p_current *= self._cat_prob[c_key][col].get(key, 0)
                     else:
-                        p_current += math.log(self._cat_prob[c_key][col].get(key, 0))
+                        probability = self._cat_prob[c_key][col].get(key, 0)
+                        p_current += math.log(probability) if probability > 0 else -math.inf
                 else:
                     assert False
                 
@@ -117,7 +118,7 @@ class NaiveBayes:
                 c_best = c
         return c_best
 
-    def score(self, X, y, use_log_space=False):
+    def score(self, X, y, use_log_space=True):
         predicted = self.predict(X, use_log_space)
         correct = 0
 
