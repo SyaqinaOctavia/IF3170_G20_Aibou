@@ -109,7 +109,7 @@ class NaiveBayes:
                     if not use_log_space:
                         p_current *= self._cat_prob[c_key][col].get(key, 0)
                     else:
-                        p_current += math.log(self._cat_prob[c_key][col].get(key, 0) + self.var_smoothing)
+                        p_current += math.log(self._cat_prob[c_key][col].get(key, 0))
                 else:
                     assert False
                 
@@ -117,6 +117,24 @@ class NaiveBayes:
                 p_best = p_current
                 c_best = c
         return c_best
+
+    def score(self, X, y, use_log_space=False):
+        predicted = self.predict(X, use_log_space)
+        correct = 0
+
+        for i in range(len(predicted)):
+            if predicted[i] == y.iloc[i]:
+                correct += 1
+
+        return correct / len(predicted)
+
+    def tune(self, var_smoothing=None, alpha=None, priors: dict[str, float] | None = None):
+        if var_smoothing is not None:
+            self.var_smoothing = var_smoothing
+        if alpha is not None:
+            self.alpha = alpha
+        if priors is not None:
+            self.priors = priors
 
     def save(self, path):
         target = Path(path)
