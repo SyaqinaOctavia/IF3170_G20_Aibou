@@ -2,54 +2,9 @@ import json
 import pandas as pd
 import numpy as np
 
-from pathlib import Path
+from ._paths import resolve_model_path
 
 class SVM:
-    """
-    Support Vector Machine classifier (soft-margin, dual form) from scratch.
-    Optimisasi dual Lagrange multipliers (alpha) menggunakan projected gradient
-    ascent dengan proyeksi ke constraint box [0, C] dan kendala sum(alpha_i y_i) = 0
-
-    Untuk multikelas, digunakan strategi One-vs-Rest (OvR), karena SVM dasarnya adalah
-    classifier biner.
-
-    Parameters
-    ----------
-    C : float, default=1.0
-        Parameter regularisasi (soft margin). Semakin besar C, semakin sedikit
-        toleransi terhadap pelanggaran margin (semakin mendekati hard-margin).
-    kernel : {'linear', 'poly', 'rbf'}, default='rbf'
-        Jenis kernel yang digunakan.
-        - 'linear' : K(x, y) = x . y
-        - 'poly'   : K(x, y) = (gamma * x.y + coef0) ** degree
-        - 'rbf'    : K(x, y) = exp(-gamma * ||x - y||^2)   (Gaussian kernel)
-    degree : int, default=3
-        Derajat polinomial (hanya untuk kernel='poly').
-    gamma : {'scale', 'auto'} or float, default='scale'
-        Koefisien kernel untuk 'rbf' dan 'poly'.
-        - 'scale' : gamma = 1 / (n_features * X.var())
-        - 'auto'  : gamma = 1 / n_features
-    coef0 : float, default=0.0
-        Suku independen pada kernel polinomial.
-    max_iter : int, default=500
-        Jumlah iterasi maksimum untuk projected gradient ascent.
-    learning_rate : float, default=1e-3
-        Learning rate untuk update alpha.
-    tol : float, default=1e-4
-        Toleransi konvergensi (berdasar perubahan nilai objektif dual).
-    random_state : int or None, default=None
-
-    Attributes
-    ----------
-    alpha_ : ndarray
-        Lagrange multipliers (hanya untuk kasus biner; untuk multikelas disimpan per model OvR).
-    support_vectors_ : ndarray
-    support_ : ndarray (indeks support vector pada data training)
-    b_ : float
-        Bias/intercept hasil training.
-    classes_ : ndarray
-    """
-
     def __init__(self, C: float = 1.0, kernel: str = "rbf", degree: int = 3, gamma="scale", 
                  coef0: float = 0.0, max_iter: int = 500, learning_rate: float = 1e-3, 
                  tol: float = 1e-4, random_state: int | None = None):
@@ -157,8 +112,8 @@ class SVM:
             return np.where(s >= 0, self.classes_[1], self.classes_[0])
         return self.classes_[np.argmax(s, axis=1)]
 
-    def save(self, path):
-        target = Path(path)
+    def save(self, filename=None):
+        target = resolve_model_path(filename, "svm")
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             'model_class': type(self).__name__,
@@ -189,13 +144,14 @@ class SVM:
         temporary = target.with_suffix(target.suffix + '.tmp')
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
         temporary.replace(target)
+        return target
 
     @staticmethod
-    def load(path):
-        target = Path(path)
+    def load(filename=None):
+        target = resolve_model_path(filename, "svm", load=True)
         payload = json.loads(target.read_text(encoding='utf-8'))
         if payload.get('model_class') != 'SVM':
-            return None
+            raise ValueError('Berkas JSON bukan state SVM')
 
         state = payload.get('state')
 
@@ -224,7 +180,6 @@ class SVM:
             for m in state.get('models')
         ]
 
-        # rebuild the public attributes that fit() normally sets
         first = model.models_[0]
         binary = len(model.models_) == 1
         model.alpha_ = first['alpha'] if binary else [m['alpha'] for m in model.models_]

@@ -6,7 +6,7 @@ import numpy as np
 
 import graphviz
 
-from pathlib import Path
+from ._paths import resolve_model_path
 
 
 class NaiveBayes:
@@ -136,8 +136,8 @@ class NaiveBayes:
         if priors is not None:
             self.priors = priors
 
-    def save(self, path):
-        target = Path(path)
+    def save(self, filename=None):
+        target = resolve_model_path(filename, "nb")
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             'model_class': type(self).__name__,
@@ -156,14 +156,15 @@ class NaiveBayes:
         temporary = target.with_suffix(target.suffix + '.tmp')
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
         temporary.replace(target)
+        return target
 
     @staticmethod
-    def load(path):
-        target = Path(path)
+    def load(filename=None):
+        target = resolve_model_path(filename, "nb", load=True)
         payload = json.loads(target.read_text(encoding='utf-8'))
         model_class = payload.get('model_class')
         if (model_class != 'NaiveBayes'):
-            return None
+            raise ValueError('Berkas JSON bukan state NaiveBayes')
         
         state = payload.get('state')
 

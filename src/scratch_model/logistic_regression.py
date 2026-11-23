@@ -1,9 +1,9 @@
 import json # gak perlu di deepnote 
 import math # gak perlu di deepnote 
-from pathlib import Path # gak perlu di deepnote 
 
 import numpy as np # gak perlu di deepnote 
 
+from ._paths import resolve_model_path # gak perlu di deepnote 
 
 class LogisticRegression:
 
@@ -35,7 +35,6 @@ class LogisticRegression:
 
     @staticmethod
     def _encode_json(value):
-        """Ubah state model dan tipe NumPy menjadi struktur aman untuk JSON."""
         if isinstance(value, np.ndarray):
             return {"__jenis__": "array", "dtype": str(value.dtype),
                     "data": LogisticRegression._encode_json(value.tolist())}
@@ -75,17 +74,8 @@ class LogisticRegression:
             return {k: LogisticRegression._decode_json(v) for k, v in value.items()}
         return value
 
-    @classmethod
-    def _model_path(cls, path=None):
-        output_dir = Path(__file__).resolve().parents[2] / "output"
-        if path is None:
-            return output_dir / "logistic_regression.json"
-        path = Path(path)
-        return path if path.is_absolute() else output_dir / path
-
-    def save(self, path=None):
-        """Simpan konfigurasi dan state model ke JSON di folder output."""
-        target = self._model_path(path)
+    def save(self, filename=None):
+        target = resolve_model_path(filename, "lr")
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "format_version": 1,
@@ -98,9 +88,8 @@ class LogisticRegression:
         return target
 
     @classmethod
-    def load(cls, path=None):
-        """Muat konfigurasi dan state model dari JSON."""
-        target = cls._model_path(path)
+    def load(cls, filename=None):
+        target = resolve_model_path(filename, "lr", load=True)
         payload = json.loads(target.read_text(encoding="utf-8"))
         if payload.get("format_version") != 1 or payload.get("model_class") != cls.__name__:
             raise ValueError("Berkas JSON bukan state Logistic Regression yang didukung")

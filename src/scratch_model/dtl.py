@@ -3,6 +3,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from ._paths import resolve_model_path
+
 class _TreeNode:
     def __init__(self, class_weights, n_samples, depth, impurity):
         self.class_weights = class_weights          
@@ -148,8 +150,10 @@ class DecisionTreeClassifier:
         rec(self.root_, "")
         return "\n".join(lines)
 
-    def save(self, path):
+    def save(self, filename=None):
         self._check_fitted()
+        target = resolve_model_path(filename, "dtl")
+        target.parent.mkdir(parents=True, exist_ok=True)
         rows = []
 
         def rec(node):
@@ -179,26 +183,16 @@ class DecisionTreeClassifier:
         }
         meta_json = json.dumps(meta, default=_json_default)
 
-        if str(path).endswith(".json"):
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump({"meta": json.loads(meta_json), "nodes": rows}, fh, default=_json_default)
-            return
-        table = pd.DataFrame(rows)
-        meta_row = {c: None for c in table.columns}
-        meta_row.update({"kind": "meta", "meta": meta_json})
-        table = pd.concat([pd.DataFrame([meta_row]), table], ignore_index=True)
-        table.to_parquet(path, index=False)
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump({"meta": json.loads(meta_json), "nodes": rows}, fh, default=_json_default)
+        return target
 
     @classmethod
-    def load(cls, path):
-        if str(path).endswith(".json"):
-            with open(path, "r", encoding="utf-8") as fh:
-                blob = json.load(fh)
-            meta, rows = blob["meta"], blob["nodes"]
-        else:
-            table = pd.read_parquet(path)
-            meta = json.loads(table.loc[table["kind"] == "meta", "meta"].iloc[0])
-            rows = table[table["kind"] == "node"].sort_values("node_id").to_dict("records")
+    def load(cls, filename=None):
+        target = resolve_model_path(filename, "dtl", load=True)
+        with open(target, "r", encoding="utf-8") as fh:
+            blob = json.load(fh)
+        meta, rows = blob["meta"], blob["nodes"]
 
         model = cls(**meta["params"])
         model.classes_ = np.array(meta["classes"])

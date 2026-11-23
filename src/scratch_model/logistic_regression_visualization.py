@@ -1,5 +1,3 @@
-"""Visualisasi lintasan Logistic Regression dengan Matplotlib."""
-
 import matplotlib.pyplot as plt # gak perlu di deepnote 
 from matplotlib.animation import FuncAnimation
 import numpy as np # gak perlu di deepnote 
