@@ -1,5 +1,8 @@
+import json
 import pandas as pd
 import numpy as np
+
+from pathlib import Path
 
 class SVM:
     """
@@ -9,8 +12,6 @@ class SVM:
 
     Untuk multikelas, digunakan strategi One-vs-Rest (OvR), karena SVM dasarnya adalah
     classifier biner.
-
-    Parameter mengikuti gaya `sklearn.svm.SVC`.
 
     Parameters
     ----------
@@ -155,3 +156,80 @@ class SVM:
         if len(self.models_) == 1:
             return np.where(s >= 0, self.classes_[1], self.classes_[0])
         return self.classes_[np.argmax(s, axis=1)]
+
+    def save(self, path):
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            'model_class': type(self).__name__,
+            'state': {
+                'C': self.C,
+                'kernel': self.kernel,
+                'degree': self.degree,
+                'gamma': self.gamma,
+                'coef0': self.coef0,
+                'max_iter': self.max_iter,
+                'learning_rate': self.learning_rate,
+                'tol': self.tol,
+                'random_state': self.random_state,
+                'resolved_gamma': float(self._g),
+                'classes': self.classes_.tolist(),
+                'models': [
+                    {
+                        'alpha': m['alpha'].tolist(),
+                        'y': m['y'].tolist(),
+                        'sv': m['sv'].tolist(),
+                        'support': m['support'].tolist(),
+                        'b': float(m['b']),
+                    }
+                    for m in self.models_
+                ],
+            }
+        }
+        temporary = target.with_suffix(target.suffix + '.tmp')
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
+        temporary.replace(target)
+
+    @staticmethod
+    def load(path):
+        target = Path(path)
+        payload = json.loads(target.read_text(encoding='utf-8'))
+        if payload.get('model_class') != 'SVM':
+            return None
+
+        state = payload.get('state')
+
+        model = SVM(
+            C=state.get('C'),
+            kernel=state.get('kernel'),
+            degree=state.get('degree'),
+            gamma=state.get('gamma'),
+            coef0=state.get('coef0'),
+            max_iter=state.get('max_iter'),
+            learning_rate=state.get('learning_rate'),
+            tol=state.get('tol'),
+            random_state=state.get('random_state'),
+        )
+
+        model._g = state.get('resolved_gamma')
+        model.classes_ = np.array(state.get('classes'))
+        model.models_ = [
+            {
+                'alpha': np.array(m['alpha'], dtype=float),
+                'y': np.array(m['y'], dtype=float),
+                'sv': np.array(m['sv'], dtype=float).reshape(len(m['alpha']), -1),
+                'support': np.array(m['support'], dtype=int),
+                'b': float(m['b']),
+            }
+            for m in state.get('models')
+        ]
+
+        # rebuild the public attributes that fit() normally sets
+        first = model.models_[0]
+        binary = len(model.models_) == 1
+        model.alpha_ = first['alpha'] if binary else [m['alpha'] for m in model.models_]
+        model.b_ = first['b'] if binary else [m['b'] for m in model.models_]
+        model.support_ = first['support']
+        model.support_vectors_ = first['sv']
+
+        return model
