@@ -15,8 +15,7 @@ class NaiveBayes:
 
     def fit(self, X, y):
         if len(X) != len(X):
-            print("X and y are not the same length")
-            return
+            raise ValueError("X and y are not the same length")
 
         total = len(X)
 
@@ -67,6 +66,13 @@ class NaiveBayes:
         
                 
     def predict(self, X):
+        for col, ftype in self._feature_types.items():
+            if col not in np.asarray(X.columns):
+                raise IndexError("X does not have column named " + col)
+            X_ftype = 'numeric' if pd.api.types.is_numeric_dtype(X[col]) else 'categorical'
+            if ftype != X_ftype:
+                raise TypeError(f'Column {col} of X has type of {X_ftype} instead of {ftype}')
+
         result = []
         for _, row in X.iterrows():
             result.append(self._predict_row(row))
