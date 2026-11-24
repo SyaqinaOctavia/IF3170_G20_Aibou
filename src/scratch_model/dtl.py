@@ -1,11 +1,11 @@
+import heapq
 import json
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import heapq
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+import numpy as np
+import pandas as pd
 
 from ._paths import resolve_model_path
 
@@ -157,16 +157,15 @@ class DecisionTreeClassifier:
 
         rec(self.root_, "")
         return "\n".join(lines)
-    
+
     def plot_tree(self, top_n=10, feature_names=None, class_names=None, palette=None,
-                      figsize=None, decimals=2, save_path=None, dpi=150):
-    
+                  figsize=None, decimals=2, save_path=None, dpi=150):
         self._check_fitted()
         names = feature_names or self.feature_names_
         cls_names = class_names or [str(c) for c in self.classes_]
-        palette = palette or ["#1d8a51", "#e07b39", "#3b82c4", "#8e6bbf", "#c2a03a"]
+        palette = palette or ["#3b82c4", "#e07b39", "#8e6bbf", "#c2a03a", "#4a90a4"]
         colors = [palette[i % len(palette)] for i in range(self._n_classes)]
-    
+
         expanded, heap, tick = set(), [], 0
         if not self.root_.is_leaf:
             heap.append((-self.root_.weight * self.root_.gain, tick, self.root_))
@@ -177,9 +176,9 @@ class DecisionTreeClassifier:
                 if not child.is_leaf:
                     tick += 1
                     heapq.heappush(heap, (-child.weight * child.gain, tick, child))
-    
-            pos, counter = {}, [0]
-    
+
+        pos, counter = {}, [0]
+
         def layout(node, depth):
             kids = list(node.children.items()) if id(node) in expanded else []
             if not kids:
@@ -190,7 +189,7 @@ class DecisionTreeClassifier:
                 x = sum(xs) / len(xs)
             pos[id(node)] = (x, -depth)
             return x
-    
+
         layout(self.root_, 0)
         n_leaf_cols = max(counter[0], 1)
         max_depth_drawn = max(-y for _, y in pos.values())
@@ -198,7 +197,7 @@ class DecisionTreeClassifier:
             figsize = (max(8.0, 2.3 * n_leaf_cols), max(4.0, 2.2 * (max_depth_drawn + 1)))
         fig, ax = plt.subplots(figsize=figsize)
         ax.axis("off")
-    
+
         def box(node, is_internal):
             x, y = pos[id(node)]
             k = int(np.argmax(node.class_weights))
@@ -213,8 +212,8 @@ class DecisionTreeClassifier:
             ax.text(x, y, text, ha="center", va="center", fontsize=8, zorder=3,
                     color="white" if (not is_internal and purity >= 0.75) else "black",
                     bbox=dict(boxstyle="round,pad=0.35", fc=face, ec=edge, lw=1.2,
-                                alpha=1.0 if is_internal else 0.45 + 0.55 * purity))
-    
+                              alpha=1.0 if is_internal else 0.45 + 0.55 * purity))
+
         def draw(node):
             x, y = pos[id(node)]
             if id(node) not in expanded:
@@ -228,19 +227,19 @@ class DecisionTreeClassifier:
                         bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none"))
                 draw(child)
             box(node, True)
-    
+
         draw(self.root_)
         ax.set_xlim(-0.7, n_leaf_cols - 0.3)
         ax.set_ylim(-max_depth_drawn - 0.6, 0.6)
         total_internal = self.get_node_count() - self.get_n_leaves()
-        ax.set_title(f"Decision Tree (C4.5): {len(expanded)} dari {total_internal} percabangan ditampilkan")
+        ax.set_title(f"Decision Tree: {len(expanded)} dari {total_internal} percabangan ditampilkan")
         ax.legend(handles=[Patch(fc=colors[i], label=f"kelas {cls_names[i]}") for i in range(self._n_classes)],
-                    loc="lower right", fontsize=8)
+                  loc="lower right", fontsize=8)
         fig.tight_layout()
         if save_path is not None:
             fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
         return fig
-    
+
     def save(self, filename=None):
         self._check_fitted()
         target = resolve_model_path(filename, "dtl")
