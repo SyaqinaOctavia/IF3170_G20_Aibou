@@ -76,10 +76,10 @@ class NaiveBayes:
 
         result = []
         for _, row in X.iterrows():
-            result.append(self._predict_proba(row))
+            result.append(self._predict_row(row))
         return result
 
-    def _predict_proba(self, X_row):
+    def _predict_row(self, X_row):
         p_best = -math.inf
         c_best = self._classes[0]
         for c in self._classes:
@@ -207,13 +207,13 @@ class NaiveBayes:
                 if ftype == 'numeric':
                     mean = self._mean[c_key][col]
                     var = self._variance[c_key][col]
-                    graph.node(f'{self._target_name}={c},{col}=x', f'{col}=x')
-                    graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}=x', label=f'μ={mean}, σ²={var}')
+                    graph.node(f'{self._target_name}={c},{col}=x', f'{col}=x\nμ={mean}, σ²={var}')
+                    graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}=x')
                 elif ftype == 'categorical':
                     for value in self._cat_prob[c_key][col].keys():
                         key = value if value != '__nan__' else 'nan'
-                        graph.node(f'{self._target_name}={c},{col}={key}', f'{col}={key}')
-                        graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}={key}', label=f'P={self._cat_prob[c_key][col].get(value, 0)}')
+                        graph.node(f'{self._target_name}={c},{col}={key}', f'{col}={key}\nP={self._cat_prob[c_key][col].get(value, 0)}')
+                        graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}={key}')
                 else:
                     assert False
         
