@@ -7,16 +7,16 @@ from ._paths import resolve_model_path
 
 class _TreeNode:
     def __init__(self, class_weights, n_samples, depth, impurity):
-        self.class_weights = class_weights          
-        self.weight = float(class_weights.sum())    
-        self.n_samples = int(n_samples)             
+        self.class_weights = class_weights
+        self.weight = float(class_weights.sum())
+        self.n_samples = int(n_samples)
         self.depth = depth
         self.impurity = float(impurity)
-        self.feature = None                         
-        self.threshold = None                       
-        self.children = {}                          
-        self.branch_weights = {}                    
-        self.gain = 0.0                             
+        self.feature = None
+        self.threshold = None
+        self.children = {}
+        self.branch_weights = {}
+        self.gain = 0.0
 
     @property
     def is_leaf(self):
@@ -65,33 +65,33 @@ class DecisionTreeClassifier:
         return self
 
     def fit(self, X, y, sample_weight=None):
-            self._validate_params()
-            df = self._frame(X, fitting=True)
-            y = np.asarray(y)
-            if len(y) != len(df):
-                raise ValueError("Jumlah baris X dan y tidak sama.")
-    
-            self.classes_, y_idx = np.unique(y, return_inverse=True)
-            self._n_classes = len(self.classes_)
-    
-            self._setup_features(df)
-            self._cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
-            self._y = y_idx.astype(np.int64)
-    
-            weights = self._sample_weights(sample_weight, y_idx)
-            self._min_leaf = max(int(self.min_samples_leaf), 1)
-            self._n_candidate_features = self._resolve_max_features()
-            self._rng = np.random.RandomState(self.random_state)
-    
-            try:
-                keep = np.nonzero(weights > 0)[0]
-                self.root_ = self._build(keep, weights[keep].copy(), 0)
-                if self.ccp_alpha and self.ccp_alpha > 0:
-                    self._prune(self.root_, self.root_.weight)
-                self._compute_importances()
-            finally:
-                del self._cols, self._y, self._rng
-            return self
+        self._validate_params()
+        df = self._frame(X, fitting=True)
+        y = np.asarray(y)
+        if len(y) != len(df):
+            raise ValueError("Jumlah baris X dan y tidak sama.")
+
+        self.classes_, y_idx = np.unique(y, return_inverse=True)
+        self._n_classes = len(self.classes_)
+
+        self._setup_features(df)
+        self._cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
+        self._y = y_idx.astype(np.int64)
+
+        weights = self._sample_weights(sample_weight, y_idx)
+        self._min_leaf = max(int(self.min_samples_leaf), 1)
+        self._n_candidate_features = self._resolve_max_features()
+        self._rng = np.random.RandomState(self.random_state)
+
+        try:
+            keep = np.nonzero(weights > 0)[0]
+            self.root_ = self._build(keep, weights[keep].copy(), 0)
+            if self.ccp_alpha and self.ccp_alpha > 0:
+                self._prune(self.root_, self.root_.weight)
+            self._compute_importances()
+        finally:
+            del self._cols, self._y, self._rng
+        return self
 
     def predict_proba(self, X):
         self._check_fitted()
@@ -168,7 +168,8 @@ class DecisionTreeClassifier:
                 "branch_weights": json.dumps({str(k): float(v) for k, v in node.branch_weights.items()}),
                 "class_weights": json.dumps(node.class_weights.tolist()),
                 "n_samples": node.n_samples, "depth": node.depth,
-                "impurity": node.impurity, "gain": node.gain, "meta": None,
+                "impurity": node.impurity, "gain": node.gain,
+                "meta": None,
             }
             return nid
 
@@ -227,7 +228,7 @@ class DecisionTreeClassifier:
                 node.branch_weights[key] = float(bweights[k])
         model.root_ = nodes[0][0]
         return model
-    
+
     def _validate_params(self):
         if self.criterion not in ("gain_ratio", "entropy", "gini"):
             raise ValueError("criterion harus 'gain_ratio', 'entropy', atau 'gini'.")
@@ -353,46 +354,46 @@ class DecisionTreeClassifier:
         return float(-np.sum(p * np.log2(p)))
 
     def _build(self, idx, w, depth):
-            cw = np.bincount(self._y[idx], weights=w, minlength=self._n_classes)
-            node = _TreeNode(cw, len(idx), depth, self._impurity(cw))
-    
-            if (cw > 0).sum() <= 1:
-                return node
-            if self.max_depth is not None and depth >= self.max_depth:
-                return node
-            if len(idx) < self.min_samples_split or len(idx) < 2 * self._min_leaf:
-                return node
-    
-            split = self._best_split(idx, w)
-            if split is None:
-                return node
-    
-            f = split["feature"]
-            col = self._cols[f][idx]
-            node.feature, node.gain = f, split["gain"]
-            parts = {}
-            if self.is_numeric_feature_[f]:
-                node.threshold = split["threshold"]
-                miss = np.isnan(col)
-                left = ~miss & (col <= node.threshold)
-                right = ~miss & ~left
-                wl, wr = w[left].sum(), w[right].sum()
-                parts[0] = (left, wl / (wl + wr))
-                parts[1] = (right, wr / (wl + wr))
-            else:
-                miss = col < 0
-                wk = w[~miss].sum()
-                for cat in split["categories"]:
-                    mask = col == cat
-                    parts[int(cat)] = (mask, w[mask].sum() / wk)
-    
-            for key, (mask, p) in parts.items():
-                child_idx = np.concatenate([idx[mask], idx[miss]])
-                child_w = np.concatenate([w[mask], w[miss] * p])
-                node.branch_weights[key] = float(p)
-                node.children[key] = self._build(child_idx, child_w, depth + 1)
+        cw = np.bincount(self._y[idx], weights=w, minlength=self._n_classes)
+        node = _TreeNode(cw, len(idx), depth, self._impurity(cw))
+
+        if (cw > 0).sum() <= 1:
             return node
-    
+        if self.max_depth is not None and depth >= self.max_depth:
+            return node
+        if len(idx) < self.min_samples_split or len(idx) < 2 * self._min_leaf:
+            return node
+
+        split = self._best_split(idx, w)
+        if split is None:
+            return node
+
+        f = split["feature"]
+        col = self._cols[f][idx]
+        node.feature, node.gain = f, split["gain"]
+        parts = {}
+        if self.is_numeric_feature_[f]:
+            node.threshold = split["threshold"]
+            miss = np.isnan(col)
+            left = ~miss & (col <= node.threshold)
+            right = ~miss & ~left
+            wl, wr = w[left].sum(), w[right].sum()
+            parts[0] = (left, wl / (wl + wr))
+            parts[1] = (right, wr / (wl + wr))
+        else:
+            miss = col < 0
+            wk = w[~miss].sum()
+            for cat in split["categories"]:
+                mask = col == cat
+                parts[int(cat)] = (mask, w[mask].sum() / wk)
+
+        for key, (mask, p) in parts.items():
+            child_idx = np.concatenate([idx[mask], idx[miss]])
+            child_w = np.concatenate([w[mask], w[miss] * p])
+            node.branch_weights[key] = float(p)
+            node.children[key] = self._build(child_idx, child_w, depth + 1)
+        return node
+
     def _best_split(self, idx, w):
         W = w.sum()
         n_feat = self.n_features_in_
@@ -437,7 +438,7 @@ class DecisionTreeClassifier:
 
         order = np.argsort(vk, kind="mergesort")
         vs = vk[order]
-        pos = np.nonzero(vs[:-1] < vs[1:])[0]             
+        pos = np.nonzero(vs[:-1] < vs[1:])[0]
         pos = pos[((pos + 1) >= self._min_leaf) & ((n_known - pos - 1) >= self._min_leaf)]
         if len(pos) == 0:
             return None
