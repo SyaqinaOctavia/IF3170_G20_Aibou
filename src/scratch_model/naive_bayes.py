@@ -10,10 +10,11 @@ from ._paths import resolve_model_path
 
 
 class NaiveBayes:
-    def __init__(self, var_smoothing=1e-9, alpha=1.0, priors: dict[str, float] | None = None):
+    def __init__(self, var_smoothing=1e-9, alpha=1.0, priors: dict[str, float] | None = None, use_log_space=True):
         self.var_smoothing = var_smoothing
         self.alpha = alpha
         self.priors = priors
+        self.use_log_space = use_log_space
 
     def fit(self, X, y):
         if len(X) != len(y):
@@ -65,7 +66,7 @@ class NaiveBayes:
                 else:
                     assert False
               
-    def predict(self, X, use_log_space=True):
+    def predict(self, X):
         for col, ftype in self._feature_types.items():
             if col not in np.asarray(X.columns):
                 raise IndexError("X does not have column named " + col)
@@ -75,10 +76,10 @@ class NaiveBayes:
 
         result = []
         for _, row in X.iterrows():
-            result.append(self._predict_proba(row, use_log_space))
+            result.append(self._predict_proba(row))
         return result
 
-    def _predict_proba(self, X_row, use_log_space=True):
+    def _predict_proba(self, X_row):
         p_best = -math.inf
         c_best = self._classes[0]
         for c in self._classes:
@@ -87,7 +88,7 @@ class NaiveBayes:
                 p_current = self.priors.get(c, self.priors.get(c_key, self._class_prior[c_key]))
             else:
                 p_current = self._class_prior[c_key]
-            if use_log_space:
+            if self.use_log_space:
                 p_current = math.log(p_current) if p_current > 0 else -math.inf
             for col, ftype in self._feature_types.items():
                 value = X_row[col]
@@ -96,7 +97,7 @@ class NaiveBayes:
                     var = self._variance[c_key][col] + self.var_smoothing
                     if pd.isna(value):
                         value = mean
-                    if not use_log_space:
+                    if not self.use_log_space:
                         p_current *= (
                             1 / math.sqrt(2 * math.pi * var) 
                             * math.exp(-(value - mean)**2 / (2 * var))
@@ -105,7 +106,7 @@ class NaiveBayes:
                         p_current += -1/2 * math.log(2 * math.pi * var) - (value - mean)**2 / (2 * var)
                 elif ftype == 'categorical':
                     key = str(value) if not pd.isna(value) else "__nan__"
-                    if not use_log_space:
+                    if not self.use_log_space:
                         p_current *= self._cat_prob[c_key][col].get(key, 0)
                     else:
                         probability = self._cat_prob[c_key][col].get(key, 0)
@@ -118,8 +119,8 @@ class NaiveBayes:
                 c_best = c
         return c_best
 
-    def score(self, X, y, use_log_space=True):
-        predicted = self.predict(X, use_log_space)
+    def score(self, X, y):
+        predicted = self.predict(X)
         correct = 0
 
         for i in range(len(predicted)):
@@ -128,13 +129,21 @@ class NaiveBayes:
 
         return correct / len(predicted)
 
-    def tune(self, var_smoothing=None, alpha=None, priors: dict[str, float] | None = None):
+    def tune(self, var_smoothing=None, alpha=None, priors: dict[str, float] | None = None, use_log_space=None):
         if var_smoothing is not None:
+            if not isinstance(var_smoothing, float):
+                raise TypeError('var_smoothing is not a float')
             self.var_smoothing = var_smoothing
         if alpha is not None:
+            if not isinstance(alpha, float):
+                raise TypeError('alpha is not a float')
             self.alpha = alpha
         if priors is not None:
             self.priors = priors
+        if use_log_space is not None:
+            if use_log_space is not True and use_log_space is not False:
+                raise TypeError('use_log_space is not a boolean')
+            self.use_log_space = use_log_space
 
     def save(self, filename=None):
         target = resolve_model_path(filename, "nb")
@@ -207,4 +216,5 @@ class NaiveBayes:
                         graph.edge(f'{self._target_name}={c}', f'{self._target_name}={c},{col}={key}', label=f'P={self._cat_prob[c_key][col].get(value, 0)}')
                 else:
                     assert False
+        
         return graph

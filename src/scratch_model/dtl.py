@@ -3,24 +3,22 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import heapq
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+
 
 from ._paths import resolve_model_path
 
 class _TreeNode:
     def __init__(self, class_weights, n_samples, depth, impurity):
-        self.class_weights = class_weights          
-        self.weight = float(class_weights.sum())    
-        self.n_samples = int(n_samples)             
+        self.class_weights = class_weights
+        self.weight = float(class_weights.sum())
+        self.n_samples = int(n_samples)
         self.depth = depth
         self.impurity = float(impurity)
-        self.feature = None                         
-        self.threshold = None                       
-        self.children = {}                          
-        self.branch_weights = {}                    
-        self.gain = 0.0                             
+        self.feature = None
+        self.threshold = None
+        self.children = {}
+        self.branch_weights = {}
+        self.gain = 0.0
 
     @property
     def is_leaf(self):
@@ -73,33 +71,33 @@ class DecisionTreeClassifier:
         return self
 
     def fit(self, X, y, sample_weight=None):
-            self._validate_params()
-            df = self._frame(X, fitting=True)
-            y = np.asarray(y)
-            if len(y) != len(df):
-                raise ValueError("Jumlah baris X dan y tidak sama.")
-    
-            self.classes_, y_idx = np.unique(y, return_inverse=True)
-            self._n_classes = len(self.classes_)
-    
-            self._setup_features(df)
-            self._cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
-            self._y = y_idx.astype(np.int64)
-    
-            weights = self._sample_weights(sample_weight, y_idx)
-            self._min_leaf = max(int(self.min_samples_leaf), 1)
-            self._n_candidate_features = self._resolve_max_features()
-            self._rng = np.random.RandomState(self.random_state)
-    
-            try:
-                keep = np.nonzero(weights > 0)[0]
-                self.root_ = self._build(keep, weights[keep].copy(), 0)
-                if self.ccp_alpha and self.ccp_alpha > 0:
-                    self._prune(self.root_, self.root_.weight)
-                self._compute_importances()
-            finally:
-                del self._cols, self._y, self._rng
-            return self
+        self._validate_params()
+        df = self._frame(X, fitting=True)
+        y = np.asarray(y)
+        if len(y) != len(df):
+            raise ValueError("Jumlah baris X dan y tidak sama.")
+
+        self.classes_, y_idx = np.unique(y, return_inverse=True)
+        self._n_classes = len(self.classes_)
+
+        self._setup_features(df)
+        self._cols = [self._encode_column(df.iloc[:, j], j) for j in range(self.n_features_in_)]
+        self._y = y_idx.astype(np.int64)
+
+        weights = self._sample_weights(sample_weight, y_idx)
+        self._min_leaf = max(int(self.min_samples_leaf), 1)
+        self._n_candidate_features = self._resolve_max_features()
+        self._rng = np.random.RandomState(self.random_state)
+
+        try:
+            keep = np.nonzero(weights > 0)[0]
+            self.root_ = self._build(keep, weights[keep].copy(), 0)
+            if self.ccp_alpha and self.ccp_alpha > 0:
+                self._prune(self.root_, self.root_.weight)
+            self._compute_importances()
+        finally:
+            del self._cols, self._y, self._rng
+        return self
 
     def predict_proba(self, X):
         self._check_fitted()
@@ -157,90 +155,7 @@ class DecisionTreeClassifier:
 
         rec(self.root_, "")
         return "\n".join(lines)
-    
-    def plot_tree(self, top_n=10, feature_names=None, class_names=None, palette=None,
-                      figsize=None, decimals=2, save_path=None, dpi=150):
-    
-        self._check_fitted()
-        names = feature_names or self.feature_names_
-        cls_names = class_names or [str(c) for c in self.classes_]
-        palette = palette or ["#1d8a51", "#e07b39", "#3b82c4", "#8e6bbf", "#c2a03a"]
-        colors = [palette[i % len(palette)] for i in range(self._n_classes)]
-    
-        expanded, heap, tick = set(), [], 0
-        if not self.root_.is_leaf:
-            heap.append((-self.root_.weight * self.root_.gain, tick, self.root_))
-        while heap and len(expanded) < max(int(top_n), 0):
-            _, _, node = heapq.heappop(heap)
-            expanded.add(id(node))
-            for child in node.children.values():
-                if not child.is_leaf:
-                    tick += 1
-                    heapq.heappush(heap, (-child.weight * child.gain, tick, child))
-    
-            pos, counter = {}, [0]
-    
-        def layout(node, depth):
-            kids = list(node.children.items()) if id(node) in expanded else []
-            if not kids:
-                x = counter[0]
-                counter[0] += 1
-            else:
-                xs = [layout(c, depth + 1) for _, c in kids]
-                x = sum(xs) / len(xs)
-            pos[id(node)] = (x, -depth)
-            return x
-    
-        layout(self.root_, 0)
-        n_leaf_cols = max(counter[0], 1)
-        max_depth_drawn = max(-y for _, y in pos.values())
-        if figsize is None:
-            figsize = (max(8.0, 2.3 * n_leaf_cols), max(4.0, 2.2 * (max_depth_drawn + 1)))
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.axis("off")
-    
-        def box(node, is_internal):
-            x, y = pos[id(node)]
-            k = int(np.argmax(node.class_weights))
-            purity = float(node.proba[k])
-            if is_internal:
-                text = f"{names[node.feature]}\ngain={node.gain:.3f}\nn={node.n_samples}"
-                face, edge = "#f4f4f2", "#444444"
-            else:
-                tail = "\n(+subtree)" if not node.is_leaf else ""
-                text = f"{cls_names[k]}\np={purity:.{decimals}f}\nn={node.n_samples}{tail}"
-                face, edge = colors[k], colors[k]
-            ax.text(x, y, text, ha="center", va="center", fontsize=8, zorder=3,
-                    color="white" if (not is_internal and purity >= 0.75) else "black",
-                    bbox=dict(boxstyle="round,pad=0.35", fc=face, ec=edge, lw=1.2,
-                                alpha=1.0 if is_internal else 0.45 + 0.55 * purity))
-    
-        def draw(node):
-            x, y = pos[id(node)]
-            if id(node) not in expanded:
-                box(node, False)
-                return
-            for key, child in node.children.items():
-                cx, cy = pos[id(child)]
-                ax.plot([x, cx], [y, cy], color="#777777", lw=1, zorder=1)
-                ax.text((x + cx) / 2, (y + cy) / 2, self._edge_label(node, key, 4),
-                        fontsize=7, ha="center", va="center", zorder=2,
-                        bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none"))
-                draw(child)
-            box(node, True)
-    
-        draw(self.root_)
-        ax.set_xlim(-0.7, n_leaf_cols - 0.3)
-        ax.set_ylim(-max_depth_drawn - 0.6, 0.6)
-        total_internal = self.get_node_count() - self.get_n_leaves()
-        ax.set_title(f"Decision Tree (C4.5): {len(expanded)} dari {total_internal} percabangan ditampilkan")
-        ax.legend(handles=[Patch(fc=colors[i], label=f"kelas {cls_names[i]}") for i in range(self._n_classes)],
-                    loc="lower right", fontsize=8)
-        fig.tight_layout()
-        if save_path is not None:
-            fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-        return fig
-    
+        
     def save(self, filename=None):
         self._check_fitted()
         target = resolve_model_path(filename, "dtl")
@@ -259,7 +174,8 @@ class DecisionTreeClassifier:
                 "branch_weights": json.dumps({str(k): float(v) for k, v in node.branch_weights.items()}),
                 "class_weights": json.dumps(node.class_weights.tolist()),
                 "n_samples": node.n_samples, "depth": node.depth,
-                "impurity": node.impurity, "gain": node.gain, "meta": None,
+                "impurity": node.impurity, "gain": node.gain,
+                "meta": None,
             }
             return nid
 
@@ -318,7 +234,7 @@ class DecisionTreeClassifier:
                 node.branch_weights[key] = float(bweights[k])
         model.root_ = nodes[0][0]
         return model
-    
+
     def _validate_params(self):
         if self.criterion not in ("gain_ratio", "entropy", "gini"):
             raise ValueError("criterion harus 'gain_ratio', 'entropy', atau 'gini'.")
@@ -444,46 +360,46 @@ class DecisionTreeClassifier:
         return float(-np.sum(p * np.log2(p)))
 
     def _build(self, idx, w, depth):
-            cw = np.bincount(self._y[idx], weights=w, minlength=self._n_classes)
-            node = _TreeNode(cw, len(idx), depth, self._impurity(cw))
-    
-            if (cw > 0).sum() <= 1:
-                return node
-            if self.max_depth is not None and depth >= self.max_depth:
-                return node
-            if len(idx) < self.min_samples_split or len(idx) < 2 * self._min_leaf:
-                return node
-    
-            split = self._best_split(idx, w)
-            if split is None:
-                return node
-    
-            f = split["feature"]
-            col = self._cols[f][idx]
-            node.feature, node.gain = f, split["gain"]
-            parts = {}
-            if self.is_numeric_feature_[f]:
-                node.threshold = split["threshold"]
-                miss = np.isnan(col)
-                left = ~miss & (col <= node.threshold)
-                right = ~miss & ~left
-                wl, wr = w[left].sum(), w[right].sum()
-                parts[0] = (left, wl / (wl + wr))
-                parts[1] = (right, wr / (wl + wr))
-            else:
-                miss = col < 0
-                wk = w[~miss].sum()
-                for cat in split["categories"]:
-                    mask = col == cat
-                    parts[int(cat)] = (mask, w[mask].sum() / wk)
-    
-            for key, (mask, p) in parts.items():
-                child_idx = np.concatenate([idx[mask], idx[miss]])
-                child_w = np.concatenate([w[mask], w[miss] * p])
-                node.branch_weights[key] = float(p)
-                node.children[key] = self._build(child_idx, child_w, depth + 1)
+        cw = np.bincount(self._y[idx], weights=w, minlength=self._n_classes)
+        node = _TreeNode(cw, len(idx), depth, self._impurity(cw))
+
+        if (cw > 0).sum() <= 1:
             return node
-    
+        if self.max_depth is not None and depth >= self.max_depth:
+            return node
+        if len(idx) < self.min_samples_split or len(idx) < 2 * self._min_leaf:
+            return node
+
+        split = self._best_split(idx, w)
+        if split is None:
+            return node
+
+        f = split["feature"]
+        col = self._cols[f][idx]
+        node.feature, node.gain = f, split["gain"]
+        parts = {}
+        if self.is_numeric_feature_[f]:
+            node.threshold = split["threshold"]
+            miss = np.isnan(col)
+            left = ~miss & (col <= node.threshold)
+            right = ~miss & ~left
+            wl, wr = w[left].sum(), w[right].sum()
+            parts[0] = (left, wl / (wl + wr))
+            parts[1] = (right, wr / (wl + wr))
+        else:
+            miss = col < 0
+            wk = w[~miss].sum()
+            for cat in split["categories"]:
+                mask = col == cat
+                parts[int(cat)] = (mask, w[mask].sum() / wk)
+
+        for key, (mask, p) in parts.items():
+            child_idx = np.concatenate([idx[mask], idx[miss]])
+            child_w = np.concatenate([w[mask], w[miss] * p])
+            node.branch_weights[key] = float(p)
+            node.children[key] = self._build(child_idx, child_w, depth + 1)
+        return node
+
     def _best_split(self, idx, w):
         W = w.sum()
         n_feat = self.n_features_in_
@@ -528,7 +444,7 @@ class DecisionTreeClassifier:
 
         order = np.argsort(vk, kind="mergesort")
         vs = vk[order]
-        pos = np.nonzero(vs[:-1] < vs[1:])[0]             
+        pos = np.nonzero(vs[:-1] < vs[1:])[0]
         pos = pos[((pos + 1) >= self._min_leaf) & ((n_known - pos - 1) >= self._min_leaf)]
         if len(pos) == 0:
             return None
