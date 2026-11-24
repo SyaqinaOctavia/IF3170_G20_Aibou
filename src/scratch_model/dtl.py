@@ -3,9 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import heapq
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+
 
 from ._paths import resolve_model_path
 
