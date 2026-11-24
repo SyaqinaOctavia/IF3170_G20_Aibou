@@ -1,6 +1,7 @@
 import json
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 from ._paths import resolve_model_path
 
@@ -69,7 +70,7 @@ class SVM:
         return alpha, b
 
     # public
-    def fit(self, X: pd.DataFrame, y: pd.DataFrame):
+    def fit(self, X, y):
         if len(X) != len(y):
             raise ValueError("X and y are not the same length")
 
@@ -188,3 +189,63 @@ class SVM:
         model.support_vectors_ = first['sv']
 
         return model
+
+def reduce_to_2d(X):
+    """
+    Return X as a 2-column array for plotting.
+    If X already has 2 features it is returned unchanged; otherwise it is
+    projected onto its first 2 principal components (PCA via SVD, pure NumPy).
+    """
+    X = np.asarray(X, dtype=float)
+    if X.shape[1] == 2:
+        return X
+    Xc = X - X.mean(axis=0)
+    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    return Xc @ Vt[:2].T
+
+def plot_svm_kernels(model, X, y, positive_class=None, save_path=None):
+    """
+    Draw the separating boundary, margins and support vectors for the Linear, Polynomial and Gaussian kernels.
+    This function will fit 
+    
+    model: an SVM object; only its hyperparameters (C, degree, gamma, coef0, max_iter, learning_rate, tol) are used.
+    X, y: training data and labels
+    positive_class: needed only if y has more than 2 classes; that class is plotted as +1 against all other classes (one-vs-rest)
+    save_path: if given, the figure is saved to this file
+    
+    Reduce X to 2D before plotting since this plotting only supports plotting for 2 features.
+    """
+    X2 = reduce_to_2d(X)
+    X2 = (X2 - X2.mean(axis=0)) / (X2.std(axis=0) + 1e-12)
+    y = np.asarray(y).ravel()
+
+    if len(np.unique(y)) > 2:
+        if positive_class is None:
+            raise ValueError("y has more than 2 classes: pass positive_class.")
+        y = np.where(y == positive_class, 1, 0)
+    classes = np.unique(y)
+
+    xx, yy = np.meshgrid(np.linspace(X2[:, 0].min() - 0.5, X2[:, 0].max() + 0.5, 300),
+                         np.linspace(X2[:, 1].min() - 0.5, X2[:, 1].max() + 0.5, 300))
+    grid = np.c_[xx.ravel(), yy.ravel()]
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
+    for ax, (name, kernel) in zip(axes, [("Linear", "linear"), ("Polynomial", "poly"), ("Gaussian", "rbf")]):
+        m = SVM(C=model.C, kernel=kernel, degree=model.degree, gamma=model.gamma,
+                coef0=model.coef0, max_iter=model.max_iter,
+                learning_rate=model.learning_rate, tol=model.tol).fit(X2, y)
+        f = m.decision_function(grid).reshape(xx.shape)
+
+        ax.contourf(xx, yy, f, levels=[-np.inf, 0, np.inf], colors=["#cfe0ff", "#ffd5d5"], alpha=0.6)
+        ax.contour(xx, yy, f, levels=[-1, 0, 1], colors="k", linestyles=["--", "-", "--"])
+        for cls, color in zip(classes, ["tab:blue", "tab:red"]):
+            ax.scatter(X2[y == cls, 0], X2[y == cls, 1], c=color, s=25, label=f"class {cls}")
+        sv = m.support_vectors_
+        ax.scatter(sv[:, 0], sv[:, 1], s=160, facecolors="none", edgecolors="k", label="support vectors")
+        ax.set_title(f"{name} kernel")
+        ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
